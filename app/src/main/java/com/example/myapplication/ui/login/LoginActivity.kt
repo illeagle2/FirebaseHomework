@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -18,6 +19,7 @@ import com.example.myapplication.databinding.ActivityLoginBinding
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.ktx.analytics
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.ktx.initialize
 import kotlinx.coroutines.*
@@ -130,25 +132,56 @@ class LoginActivity : AppCompatActivity() {
 
     private fun signIn(email: String, password: String){
 
-        CoroutineScope(Dispatchers.IO).launch {
-
-                if(mAuth.signInWithEmailAndPassword(email, password).isSuccessful) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(
-                            this@LoginActivity,
-                            "$email was logged in",
-                            Toast.LENGTH_SHORT
-                        )
+        mAuth.signInWithEmailAndPassword(email, password)
+            .addOnCompleteListener(this) { task ->
+                if (task.isSuccessful) {
+                    // Sign in success, update UI with the signed-in user's information
+                    Log.d("FIREBASE", "createUserWithEmail:success")
+                    val user = mAuth.currentUser
+                    if (user != null) {
+                        updateUI(user)
                     }
                 } else {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(
-                            this@LoginActivity,
-                            "login failed",
-                            Toast.LENGTH_SHORT)
-                    }
+                    // If sign in fails, display a message to the user.
+                    Log.w("FIREBASE", "createUserWithEmail:failure", task.exception)
+                    Toast.makeText(
+                        baseContext, "Authentication failed.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+//                    updateUI(null)
                 }
-        }
+            }
+
+//        CoroutineScope(Dispatchers.IO).launch {
+//
+//                if(mAuth.signInWithEmailAndPassword(email, password).isSuccessful) {
+//                    withContext(Dispatchers.Main) {
+//                        Toast.makeText(
+//                            this@LoginActivity,
+//                            "$email was logged in",
+//                            Toast.LENGTH_SHORT
+//                        )
+//                    }
+//                } else {
+//                    withContext(Dispatchers.Main) {
+//                        Toast.makeText(
+//                            this@LoginActivity,
+//                            "login failed",
+//                            Toast.LENGTH_SHORT)
+//                    }
+//                }
+//        }
+
+    }
+
+    private fun updateUI(user: FirebaseUser) {
+        val welcome = getString(R.string.welcome)
+        val displayName = user.email
+        Toast.makeText(
+            applicationContext,
+            "$welcome $displayName",
+            Toast.LENGTH_LONG
+        ).show()
 
     }
 
