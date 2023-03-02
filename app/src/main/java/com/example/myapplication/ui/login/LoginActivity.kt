@@ -1,6 +1,8 @@
 package com.example.myapplication.ui.login
 
 import android.app.Activity
+import android.content.Intent
+import android.content.IntentSender
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -16,13 +18,23 @@ import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import com.example.myapplication.R
 import com.example.myapplication.databinding.ActivityLoginBinding
+import com.google.android.gms.auth.api.identity.BeginSignInRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.auth.api.identity.SignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.ktx.analytics
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.ktx.initialize
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 
 
 class LoginActivity : AppCompatActivity() {
@@ -31,6 +43,10 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLoginBinding
     private lateinit var analytics: FirebaseAnalytics
     private lateinit var mAuth: FirebaseAuth
+    private lateinit var oneTapClient: SignInClient
+    private lateinit var signInRequest: BeginSignInRequest
+    private val REQ_ONE_TAP = 2
+    private var showOneTapUI = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,7 +58,22 @@ class LoginActivity : AppCompatActivity() {
         Firebase.initialize(this) //precaution to ensure Firebase is always int
         analytics = Firebase.analytics
         mAuth = FirebaseAuth.getInstance()
-        mAuth.signOut()
+
+        //setup one tap signin
+        oneTapClient = Identity.getSignInClient(this)
+        signInRequest = BeginSignInRequest.builder()
+            .setPasswordRequestOptions(BeginSignInRequest.PasswordRequestOptions.builder()
+                .setSupported(true)
+                .build())
+            .setGoogleIdTokenRequestOptions(
+                BeginSignInRequest.GoogleIdTokenRequestOptions.builder()
+                    .setSupported(true)
+                    // Your server's client ID, not your Android client ID.
+                    .setServerClientId(getString(R.string.client_id))
+                    // Only show accounts previously used to sign in.
+                    .setFilterByAuthorizedAccounts(true)
+                    .build())
+            .build()
 
 
         val username = binding.username
@@ -50,6 +81,16 @@ class LoginActivity : AppCompatActivity() {
         val login = binding.login
         val googleLogin = binding.btnGoogle
         val loading = binding.loading
+
+        //check if user is logged in
+        showOneTapUI = false
+        if (mAuth.currentUser != null) {
+            mAuth.signOut()
+            showOneTapUI = true
+        }
+
+
+
 
         loginViewModel = ViewModelProvider(this, LoginViewModelFactory())
             .get(LoginViewModel::class.java)
@@ -111,8 +152,17 @@ class LoginActivity : AppCompatActivity() {
             }
 
             googleLogin?.setOnClickListener{
-                //mAuth.signInWithCredential()
+                val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestIdToken(getString(R.string.client_id))
+                    .requestEmail()
+                    .build()
+
+                val signInClient = GoogleSignIn.getClient(this@LoginActivity, options)
+                signInClient.signInIntent.also {
+                    startActivityForResult(it, REQ_ONE_TAP)
+                }
             }
+
 
             login.setOnClickListener {
                 loading.visibility = View.VISIBLE
@@ -127,6 +177,34 @@ class LoginActivity : AppCompatActivity() {
                     )
                 )
             }
+        }
+    }
+
+    private fun googleAuthForFirebase(account: GoogleSignInAccount){
+        val credentials = GoogleAuthProvider.getCredential(account.idToken, null)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                mAuth.signInWithCredential(credentials).await()
+                withContext(Dispatchers.Main){
+                    Log.d("GoogleAuthForFirebase Function", "Login Success")
+                }
+
+            } catch (e: Exception){
+                withContext(Dispatchers.Main){
+                    Log.d("GoogleAuthForFirebase Function", "error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_ONE_TAP) {
+            val account = GoogleSignIn.getSignedInAccountFromIntent(data).result
+            account?.let {
+                googleAuthForFirebase(account)
+            }
+
         }
     }
 
@@ -151,26 +229,26 @@ class LoginActivity : AppCompatActivity() {
 //                    updateUI(null)
                 }
             }
+    }
 
-//        CoroutineScope(Dispatchers.IO).launch {
-//
-//                if(mAuth.signInWithEmailAndPassword(email, password).isSuccessful) {
-//                    withContext(Dispatchers.Main) {
-//                        Toast.makeText(
-//                            this@LoginActivity,
-//                            "$email was logged in",
-//                            Toast.LENGTH_SHORT
-//                        )
-//                    }
-//                } else {
-//                    withContext(Dispatchers.Main) {
-//                        Toast.makeText(
-//                            this@LoginActivity,
-//                            "login failed",
-//                            Toast.LENGTH_SHORT)
-//                    }
-//                }
-//        }
+    private fun createUser(email: String, password: String){
+        mAuth.createUserWithEmailAndPassword(email, password)
+            .addOnCompleteListener(this) { task ->
+                if (task.isSuccessful) {
+                    Log.d("CreateUser Function", "$email was created")
+                    val user = mAuth.currentUser
+                    updateUI(user!!)
+                }
+                else {
+                    Log.w("CreateUser Function", "Create user failed", task.exception)
+                }
+
+
+            }
+    }
+
+    override fun onStart() {
+        super.onStart()
 
     }
 
@@ -200,6 +278,8 @@ class LoginActivity : AppCompatActivity() {
         Toast.makeText(applicationContext, errorString, Toast.LENGTH_SHORT).show()
     }
 }
+
+
 
 /**
  * Extension function to simplify setting an afterTextChanged action to EditText components.
